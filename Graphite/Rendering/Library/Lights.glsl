@@ -65,6 +65,9 @@ struct Graphite_LightSample
 // A word of a light's record, the default for a light built in the shader
 vec4 graphite_LightWord(Graphite_LightSample L, uint word, vec4 fallback)
 {
+#ifdef BENCH_LEANREAD
+    return Graphite_SpatialVec4(L.recordArray, L.recordWord + word);
+#endif
     return L.recordArray == GRAPHITE_TREE_INVALID ? fallback : Graphite_SpatialVec4(L.recordArray, L.recordWord + word);
 }
 
@@ -95,9 +98,20 @@ vec4 Graphite_LightHostData(Graphite_LightSample L) { return graphite_LightWord(
 // A light's colour times its intensity
 vec3 Graphite_LightRadiance(Graphite_LightSample L)
 {
+#ifdef BENCH_LEANREAD
+    // Bench: LightRecord.HostData holds color times intensity and the shadow slot
+    return Graphite_SpatialVec4(L.recordArray, L.recordWord + 8u).rgb;
+#endif
     vec4 colorIntensity = graphite_LightWord(L, 1u, vec4(L.color, L.intensity));
     return colorIntensity.rgb * colorIntensity.w;
 }
+
+#ifdef BENCH_SHADOWREADS
+bool graphite_BenchReceives = true;
+#endif
+#ifdef BENCH_LEANREAD
+float graphite_BenchExposure = 0.0;
+#endif
 
 // How much of a local light reaches a surface past its shadow, 1 lit
 float Graphite_LocalLightShadow(Graphite_LightSample L, vec3 relativePos, vec3 geomNormal)
@@ -105,11 +119,24 @@ float Graphite_LocalLightShadow(Graphite_LightSample L, vec3 relativePos, vec3 g
 #if defined(RR_BENCH_NOSHADOW) || defined(RR_BENCH_NOBRDF) || defined(RR_BENCH_WALK)
     return 1.0;
 #endif
+#ifdef BENCH_SHADOWREADS
+    if (L.recordArray == GRAPHITE_TREE_INVALID || (L.type != GRAPHITE_LIGHT_POINT && L.type != GRAPHITE_LIGHT_SPOT) || !graphite_BenchReceives)
+        return 1.0;
+#else
     if (L.recordArray == GRAPHITE_TREE_INVALID || (L.type != GRAPHITE_LIGHT_POINT && L.type != GRAPHITE_LIGHT_SPOT) || !Graphite_ReceivesShadows())
         return 1.0;
+#endif
+#ifdef BENCH_LEANREAD
+    int slot = floatBitsToInt(Graphite_SpatialVec4(L.recordArray, L.recordWord + 8u).w);
+#else
     int slot = floatBitsToInt(Graphite_SpatialVec4(L.recordArray, L.recordWord + 6u).z);
+#endif
     if (slot < 0)
         return 1.0;
+#ifdef BENCH_SHADOWREADS
+    // Bench: a point light never uses its direction, and no light in the game has a source radius
+    return Graphite_LocalShadow(slot, L.type == GRAPHITE_LIGHT_POINT, L.position, L.type == GRAPHITE_LIGHT_POINT ? vec3(0.0, 0.0, 1.0) : Graphite_LightDirection(L), 0.0, relativePos, geomNormal);
+#endif
     return Graphite_LocalShadow(slot, L.type == GRAPHITE_LIGHT_POINT, L.position, Graphite_LightDirection(L), Graphite_LightSourceRadius(L), relativePos, geomNormal);
 }
 
@@ -139,6 +166,11 @@ struct Graphite_LightIterator
 {
     uint next;
     uint count;
+#ifdef BENCH_LEANREAD
+    uint region;
+    vec3 offset;
+    vec3 offsetLow;
+#endif
 };
 
 Graphite_LightIterator Graphite_BeginLights(vec3 relativePos)
@@ -146,6 +178,15 @@ Graphite_LightIterator Graphite_BeginLights(vec3 relativePos)
     Graphite_LightIterator it;
     it.next = 0u;
     it.count = 0u;
+#ifdef BENCH_LEANREAD
+    it.region = 0xFFFFFFFEu;
+    it.offset = vec3(0.0);
+    it.offsetLow = vec3(0.0);
+    graphite_BenchExposure = Graphite_Exposure();
+#endif
+#ifdef BENCH_SHADOWREADS
+    graphite_BenchReceives = Graphite_ReceivesShadows();
+#endif
     uint layers = Graphite_SurfaceLayers();
     Graphite_TreeQuery q;
     Graphite_BeginQuery(q, relativePos, GRAPHITE_SET_LIGHTS);
@@ -195,7 +236,11 @@ Graphite_LightIterator Graphite_BeginLights(vec3 relativePos)
             precise vec3 position = (positionRange.xyz - q.offset) - q.offsetLow;
             vec3 d = relativePos - position;
             if (dot(d, d) <= positionRange.w * positionRange.w && (floatBitsToUint(Graphite_SpatialVec4(array, k * 9u + 6u).w) & layers) != 0u)
+#ifdef BENCH_PACK24
+                graphite_Hits[it.count++] = (array & 1u) != 0u ? (k | 0x80000000u) : (k | (q.region << 20));
+#else
                 graphite_Hits[it.count++] = uvec2(k | ((array & 1u) << 31), q.region);
+#endif
         }
     }
 #endif
@@ -206,9 +251,25 @@ bool Graphite_NextLight(inout Graphite_LightIterator it, out Graphite_LightSampl
 {
     if (it.next >= it.count)
         return false;
+#ifdef BENCH_PACK24
+    uint packedHit = graphite_Hits[it.next++];
+    uvec2 hit = (packedHit >> 31) != 0u ? uvec2(packedHit, GRAPHITE_TREE_INVALID) : uvec2(packedHit & 0xFFFFFu, packedHit >> 20);
+#else
     uvec2 hit = graphite_Hits[it.next++];
+#endif
     vec3 offset, offsetLow;
+#ifdef BENCH_LEANREAD
+    // Bench: hits come in runs from one tree, so its offsets are read once a run
+    if (hit.y != it.region)
+    {
+        Graphite_HitOffsets(GRAPHITE_SET_LIGHTS, hit.y, it.offset, it.offsetLow);
+        it.region = hit.y;
+    }
+    offset = it.offset;
+    offsetLow = it.offsetLow;
+#else
     Graphite_HitOffsets(GRAPHITE_SET_LIGHTS, hit.y, offset, offsetLow);
+#endif
     Graphite_ReadLight(GRAPHITE_SET_LIGHTS * 2u + (hit.x >> 31), hit.x & 0x7FFFFFFFu, offset, offsetLow, L);
     return true;
 }
@@ -447,7 +508,11 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
     vec3 N = f.baseNormal;
     float NdotL = dot(N, Lc);
 
+#ifdef BENCH_LEANREAD
+    c.radiance = vec3(graphite_BenchExposure);
+#else
     c.radiance = vec3(Graphite_Exposure());
+#endif
     c.diffuseL = Lc;
     c.specularL = Lc;
     c.extent = vec2(0.0);
@@ -469,8 +534,14 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
             cone = smoothstep(spotCos.x, spotCos.y, axisCos);
         }
 
+#ifdef BENCH_LEANREAD
+        // Bench: every light in the game is a point source
+        float radius = 0.0;
+        bool sphere = false;
+#else
         float radius = Graphite_LightSourceRadius(L);
         bool sphere = radius > 1e-4;
+#endif
         float facing = NdotL;
 #ifdef GRAPHITE_LIGHT_COAT
         facing = max(facing, dot(f.coatNormal, Lc));
@@ -531,6 +602,7 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
         }
         c.radiance *= Graphite_LightMask(L, -Lc);
     }
+#ifndef BENCH_LEANREAD
     else if (L.type == GRAPHITE_LIGHT_TUBE)
     {
         float tubeLength = Graphite_LightSize(L).x;
@@ -600,6 +672,8 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
         c.coat = graphite_LtcShape(toLight, shapeX, shapeY, disk, f.coatNormal, f.view, f.coatAlpha) * window;
 #endif
     }
+
+#endif
 
     float lit = c.diffuse + c.specular;
 #ifdef GRAPHITE_LIGHT_COAT

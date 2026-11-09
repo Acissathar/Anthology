@@ -17,11 +17,35 @@
 
 // Each level visited defers at most three siblings, so this covers ten levels of a tree. Above it sit the runs of region
 // entries a query found, as first and end pairs
-#pragma variant global RR_BENCH OFF HARD NOSHADOW NOBRDF WALK NOLOCAL FLAT EARLYTENT DIMHARD CUT255 TOP6 LEANMEM TOYFAST
+#pragma variant global RR_BENCH OFF HARD NOSHADOW NOBRDF WALK NOLOCAL FLAT EARLYTENT DIMHARD CUT255 TOP6 LEANMEM TOYFAST STACK16 HITS12 PACK24 LEANREAD DIRECTIDX SHADOWREADS SETUPONLY OCCPIXEL KEEPALL KEEPDIRECT
+#if defined(RR_BENCH_STACK16) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT)
+#define BENCH_STACK16
+#endif
+#if defined(RR_BENCH_PACK24) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT)
+#define BENCH_PACK24
+#endif
+#if defined(RR_BENCH_LEANREAD) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT)
+#define BENCH_LEANREAD
+#endif
+#if defined(RR_BENCH_SHADOWREADS) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT)
+#define BENCH_SHADOWREADS
+#endif
+#if defined(RR_BENCH_DIRECTIDX) || defined(RR_BENCH_KEEPDIRECT)
+#define BENCH_DIRECTIDX
+#endif
+#ifdef BENCH_STACK16
+#define GRAPHITE_TREE_STACK 16
+#endif
+#ifdef RR_BENCH_HITS12
+#define GRAPHITE_MAX_HITS 12
+#endif
+#ifdef BENCH_PACK24
+#define GRAPHITE_MAX_HITS 24
+#endif
 #ifdef RR_BENCH_LEANMEM
 #define GRAPHITE_TREE_STACK 16
 #define GRAPHITE_MAX_HITS 12
-#else
+#elif !defined(BENCH_STACK16)
 #define GRAPHITE_TREE_STACK 32
 #endif
 #ifdef RR_BENCH_TOP6
@@ -63,6 +87,13 @@ uint Graphite_MovingRecords(uint set) { return set * 2u + 1u; }
 // A 16 byte word of a record array, stride words to a record
 vec4 Graphite_SpatialVec4(uint array, uint word)
 {
+#ifdef BENCH_DIRECTIDX
+    // Bench: the light set's two arrays by a plain index, in place of a non-uniform one
+    if (array == 0u)
+        return uintBitsToFloat(graphite_SpatialRecords[0].words[word]);
+    if (array == 1u)
+        return uintBitsToFloat(graphite_SpatialRecords[1].words[word]);
+#endif
     return uintBitsToFloat(graphite_SpatialRecords[nonuniformEXT(array)].words[word]);
 }
 
@@ -80,7 +111,12 @@ uint graphite_TreeStack[GRAPHITE_TREE_STACK + GRAPHITE_REGION_RUNS * 2];
 #ifndef GRAPHITE_MAX_HITS
 #define GRAPHITE_MAX_HITS 32
 #endif
+#ifdef BENCH_PACK24
+// Bench: one word a hit. Moving tree: top bit and the record. Static: the region in bits 20 to 30, the record below
+uint graphite_Hits[GRAPHITE_MAX_HITS];
+#else
 uvec2 graphite_Hits[GRAPHITE_MAX_HITS];
+#endif
 #ifdef RR_BENCH_TOP6
 float graphite_HitScore[GRAPHITE_MAX_HITS];
 #endif

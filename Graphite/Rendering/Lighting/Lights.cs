@@ -880,7 +880,8 @@ internal sealed class WorldLighting
             Cookie = slots.Cookie,
             Ies = slots.Ies,
             Sampler = slots.Sampler,
-            HostData = light.HostData,
+            // Bench: color times intensity and the shadow slot in one read. The game reads no host data
+            HostData = new Float4(light.Color.X * intensity, light.Color.Y * intensity, light.Color.Z * intensity, BitConverter.Int32BitsToSingle(shadowed ? index : -1)),
         };
     }
 

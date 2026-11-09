@@ -378,6 +378,11 @@ float Graphite_LocalShadow(int shadowSlot, bool cube, vec3 lightPosition, vec3 l
     if (filtering == GRAPHITE_SHADOW_CONTACT && lightRadius > 0.0)
         return mix(1.0, Graphite_LocalContact(first, cube, index, d, Graphite_ShadowPlane(geomNormal, toLight), lightRadius, clip.w), fade);
 #endif
+#ifdef RR_BENCH_SETUPONLY
+    // Bench: every step before the first tap, its results kept alive
+    vec3 benchCoords = Graphite_ShadowCoords(clip, rect);
+    return 1.0 - abs(benchCoords.x + benchCoords.y + benchCoords.z + params.z + params.x) * 1e-7;
+#endif
 #ifdef RR_BENCH_HARD
     filtering = 0.0;
 #endif
