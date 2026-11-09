@@ -317,7 +317,7 @@ internal struct LightRecord
     public Float4 SpotShadow;
     public Float4 Shadow;
     public uint Cookie, Ies, Sampler;
-    private uint _pad;
+    public uint _pad;
     public Float4 HostData;
 }
 
@@ -586,6 +586,19 @@ internal sealed class WorldLighting
         _resources = resources;
         _report = report;
         Lights = new SpatialIndex<LightRecord>(tables.Scope("Lights"), SpatialIndex.LightsSet, Pack, report);
+        // Bench: the sphere through a spot's tip and rim, Roadmap 6.5
+        Lights.BenchBound = item =>
+        {
+            LightDesc light = _lights[item];
+            if (light.Type != LightType.Spot || light.OuterAngle >= 60f)
+                return null;
+            Float3 d = light.Direction;
+            float length = MathF.Sqrt(d.X * d.X + d.Y * d.Y + d.Z * d.Z);
+            if (length <= 0f)
+                return null;
+            float radius = MathF.Max(light.Range, 1e-4f) / (2f * MathF.Cos(light.OuterAngle * MathF.PI / 180f));
+            return (new Double3(light.Position.X + d.X / length * radius, light.Position.Y + d.Y / length * radius, light.Position.Z + d.Z / length * radius), radius);
+        };
         Decals = new SpatialIndex<DecalRecord>(tables.Scope("Decals"), SpatialIndex.DecalsSet, (index, origin) => Pack(_decalLooks[index], origin), report);
         World = tables.Of<WorldLightingRecord>("World", 1);
         Directionals = tables.Of<DirectionalRecord>("Directionals", 8);
@@ -877,11 +890,12 @@ internal sealed class WorldLighting
             Shape = new Float4(light.Size.Y, light.SourceRadius, 0, 0),
             SpotShadow = new Float4(spot ? outer : -1f, spot ? MathF.Max(MathF.Cos(light.InnerAngle * MathF.PI / 180f), outer + 1e-4f) : 1f, light.Shadow.DepthBias, light.Shadow.NormalBias),
             Shadow = new Float4(light.Shadow.Strength, (float)light.Shadow.Filter, BitConverter.Int32BitsToSingle(shadowed ? index : -1), BitConverter.UInt32BitsToSingle(light.LayerMask)),
-            Cookie = slots.Cookie,
-            Ies = slots.Ies,
-            Sampler = slots.Sampler,
-            // Bench: color times intensity and the shadow slot in one read. The game reads no host data
-            HostData = new Float4(light.Color.X * intensity, light.Color.Y * intensity, light.Color.Z * intensity, BitConverter.Int32BitsToSingle(shadowed ? index : -1)),
+            // Bench: a light with no cookie or profile holds color times intensity and the shadow slot here, for the COLORSLOT read. Host data stays for the fog
+            Cookie = (slots.Flags & 96u) == 0u ? BitConverter.SingleToUInt32Bits(light.Color.X * intensity) : slots.Cookie,
+            Ies = (slots.Flags & 96u) == 0u ? BitConverter.SingleToUInt32Bits(light.Color.Y * intensity) : slots.Ies,
+            Sampler = (slots.Flags & 96u) == 0u ? BitConverter.SingleToUInt32Bits(light.Color.Z * intensity) : slots.Sampler,
+            _pad = (uint)(shadowed ? index : -1),
+            HostData = light.HostData,
         };
     }
 
@@ -1406,6 +1420,21 @@ internal sealed class SpatialIndex<TRecord> : SpatialIndex where TRecord : unman
     private TRecord[] _scratch = new TRecord[64];
     private Vector4[] _spheres = new Vector4[64];
 
+    // Bench: while the RR_TIGHT_SPOTS environment variable is 1, a moving item may go into the view's tree by another sphere, its record unchanged
+    public Func<int, (Double3 Center, float Radius)?>? BenchBound;
+    private bool _benchTight;
+
+    private void BenchSphere(int item, out Double3 center, out float radius)
+    {
+        center = _center[item];
+        radius = _radius[item];
+        if (_benchTight && BenchBound?.Invoke(item) is { } tight)
+        {
+            center = tight.Center;
+            radius = tight.Radius;
+        }
+    }
+
     public SpatialIndex(TableHost tables, int slot, Func<int, Double3, TRecord> pack, Action<RendererError> report) : base(slot)
     {
         _pack = pack;
@@ -1460,10 +1489,12 @@ internal sealed class SpatialIndex<TRecord> : SpatialIndex where TRecord : unman
 
     private uint BuildMoving(in CullFrustum frustum, SpatialView view, Uploader uploader)
     {
+        _benchTight = Environment.GetEnvironmentVariable("RR_TIGHT_SPOTS") == "1";
         _culled.Clear();
         foreach (int item in _moving)
         {
-            if (frustum.Sphere(_center[item], _radius[item]))
+            BenchSphere(item, out Double3 benchCenter, out float benchRadius);
+            if (frustum.Sphere(benchCenter, benchRadius))
                 _culled.Add(item);
         }
         if (_culled.Count == 0)
@@ -1473,8 +1504,9 @@ internal sealed class SpatialIndex<TRecord> : SpatialIndex where TRecord : unman
             _spheres = new Vector4[_culled.Count * 2];
         for (int i = 0; i < _culled.Count; i++)
         {
-            Float3 p = frustum.Relative(_center[_culled[i]]);
-            _spheres[i] = new Vector4(p.X, p.Y, p.Z, _radius[_culled[i]]);
+            BenchSphere(_culled[i], out Double3 benchCenter, out float benchRadius);
+            Float3 p = frustum.Relative(benchCenter);
+            _spheres[i] = new Vector4(p.X, p.Y, p.Z, benchRadius);
         }
 
         LightTreeBuilder builder = view.Tree;

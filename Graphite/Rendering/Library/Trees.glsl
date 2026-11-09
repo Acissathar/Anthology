@@ -17,17 +17,39 @@
 
 // Each level visited defers at most three siblings, so this covers ten levels of a tree. Above it sit the runs of region
 // entries a query found, as first and end pairs
-#pragma variant global RR_BENCH OFF HARD NOSHADOW NOBRDF WALK NOLOCAL FLAT EARLYTENT DIMHARD CUT255 TOP6 LEANMEM TOYFAST STACK16 HITS12 PACK24 LEANREAD DIRECTIDX SHADOWREADS SETUPONLY OCCPIXEL KEEPALL KEEPDIRECT
-#if defined(RR_BENCH_STACK16) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT)
+#pragma variant global RR_BENCH OFF HARD NOSHADOW NOBRDF WALK NOLOCAL FLAT EARLYTENT DIMHARD CUT255 TOP6 LEANMEM TOYFAST STACK16 HITS12 PACK24 PACK32 LEANREAD NOAREA NOSPHERE POINTSPOT NOFALLBACK COLORSLOT OFFSETRUN EXPOSEONCE DIRECTIDX SHADOWREADS SETUPONLY OCCPIXEL OCCAMB KEEPALL KEEPDIRECT ENGALL GLOOP GLOOPOCC GOFFRUN GEXPOSE GPACK24 GPACK32 GFACING GNOLAYER GSHADOWREADS GTOYINLINE GSHADOWCOPY GSURF GALL
+#if defined(RR_BENCH_STACK16) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT) || defined(RR_BENCH_ENGALL)
 #define BENCH_STACK16
 #endif
 #if defined(RR_BENCH_PACK24) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT)
 #define BENCH_PACK24
 #endif
-#if defined(RR_BENCH_LEANREAD) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT)
+#if defined(RR_BENCH_PACK32) || defined(RR_BENCH_ENGALL)
+#define BENCH_PACK24
+#define BENCH_PACK32
+#endif
+#if defined(RR_BENCH_LEANREAD) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT) || defined(RR_BENCH_ENGALL)
 #define BENCH_LEANREAD
 #endif
-#if defined(RR_BENCH_SHADOWREADS) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT)
+#if defined(RR_BENCH_NOAREA) || defined(RR_BENCH_POINTSPOT) || defined(BENCH_LEANREAD)
+#define BENCH_NOAREA
+#endif
+#if defined(RR_BENCH_NOSPHERE) || defined(RR_BENCH_POINTSPOT) || defined(BENCH_LEANREAD)
+#define BENCH_NOSPHERE
+#endif
+#if defined(RR_BENCH_NOFALLBACK) || defined(BENCH_LEANREAD)
+#define BENCH_NOFALLBACK
+#endif
+#if defined(RR_BENCH_COLORSLOT) || defined(BENCH_LEANREAD)
+#define BENCH_COLORSLOT
+#endif
+#if defined(RR_BENCH_OFFSETRUN) || defined(BENCH_LEANREAD)
+#define BENCH_OFFSETRUN
+#endif
+#if defined(RR_BENCH_EXPOSEONCE) || defined(BENCH_LEANREAD)
+#define BENCH_EXPOSEONCE
+#endif
+#if defined(RR_BENCH_SHADOWREADS) || defined(RR_BENCH_KEEPALL) || defined(RR_BENCH_KEEPDIRECT) || defined(RR_BENCH_ENGALL)
 #define BENCH_SHADOWREADS
 #endif
 #if defined(RR_BENCH_DIRECTIDX) || defined(RR_BENCH_KEEPDIRECT)
@@ -39,7 +61,7 @@
 #ifdef RR_BENCH_HITS12
 #define GRAPHITE_MAX_HITS 12
 #endif
-#ifdef BENCH_PACK24
+#if defined(BENCH_PACK24) && !defined(BENCH_PACK32)
 #define GRAPHITE_MAX_HITS 24
 #endif
 #ifdef RR_BENCH_LEANMEM
@@ -112,6 +134,7 @@ uint graphite_TreeStack[GRAPHITE_TREE_STACK + GRAPHITE_REGION_RUNS * 2];
 #define GRAPHITE_MAX_HITS 32
 #endif
 #ifdef BENCH_PACK24
+// PACK32 shares this form with 32 entries
 // Bench: one word a hit. Moving tree: top bit and the record. Static: the region in bits 20 to 30, the record below
 uint graphite_Hits[GRAPHITE_MAX_HITS];
 #else

@@ -65,7 +65,7 @@ struct Graphite_LightSample
 // A word of a light's record, the default for a light built in the shader
 vec4 graphite_LightWord(Graphite_LightSample L, uint word, vec4 fallback)
 {
-#ifdef BENCH_LEANREAD
+#ifdef BENCH_NOFALLBACK
     return Graphite_SpatialVec4(L.recordArray, L.recordWord + word);
 #endif
     return L.recordArray == GRAPHITE_TREE_INVALID ? fallback : Graphite_SpatialVec4(L.recordArray, L.recordWord + word);
@@ -98,9 +98,9 @@ vec4 Graphite_LightHostData(Graphite_LightSample L) { return graphite_LightWord(
 // A light's colour times its intensity
 vec3 Graphite_LightRadiance(Graphite_LightSample L)
 {
-#ifdef BENCH_LEANREAD
-    // Bench: LightRecord.HostData holds color times intensity and the shadow slot
-    return Graphite_SpatialVec4(L.recordArray, L.recordWord + 8u).rgb;
+#ifdef BENCH_COLORSLOT
+    // Bench: word 7 of a light with no cookie or profile holds color times intensity and the shadow slot, host data left for the fog
+    return Graphite_SpatialVec4(L.recordArray, L.recordWord + 7u).rgb;
 #endif
     vec4 colorIntensity = graphite_LightWord(L, 1u, vec4(L.color, L.intensity));
     return colorIntensity.rgb * colorIntensity.w;
@@ -109,7 +109,7 @@ vec3 Graphite_LightRadiance(Graphite_LightSample L)
 #ifdef BENCH_SHADOWREADS
 bool graphite_BenchReceives = true;
 #endif
-#ifdef BENCH_LEANREAD
+#ifdef BENCH_EXPOSEONCE
 float graphite_BenchExposure = 0.0;
 #endif
 
@@ -126,8 +126,8 @@ float Graphite_LocalLightShadow(Graphite_LightSample L, vec3 relativePos, vec3 g
     if (L.recordArray == GRAPHITE_TREE_INVALID || (L.type != GRAPHITE_LIGHT_POINT && L.type != GRAPHITE_LIGHT_SPOT) || !Graphite_ReceivesShadows())
         return 1.0;
 #endif
-#ifdef BENCH_LEANREAD
-    int slot = floatBitsToInt(Graphite_SpatialVec4(L.recordArray, L.recordWord + 8u).w);
+#ifdef BENCH_COLORSLOT
+    int slot = floatBitsToInt(Graphite_SpatialVec4(L.recordArray, L.recordWord + 7u).w);
 #else
     int slot = floatBitsToInt(Graphite_SpatialVec4(L.recordArray, L.recordWord + 6u).z);
 #endif
@@ -166,7 +166,7 @@ struct Graphite_LightIterator
 {
     uint next;
     uint count;
-#ifdef BENCH_LEANREAD
+#ifdef BENCH_OFFSETRUN
     uint region;
     vec3 offset;
     vec3 offsetLow;
@@ -178,10 +178,12 @@ Graphite_LightIterator Graphite_BeginLights(vec3 relativePos)
     Graphite_LightIterator it;
     it.next = 0u;
     it.count = 0u;
-#ifdef BENCH_LEANREAD
+#ifdef BENCH_OFFSETRUN
     it.region = 0xFFFFFFFEu;
     it.offset = vec3(0.0);
     it.offsetLow = vec3(0.0);
+#endif
+#ifdef BENCH_EXPOSEONCE
     graphite_BenchExposure = Graphite_Exposure();
 #endif
 #ifdef BENCH_SHADOWREADS
@@ -258,7 +260,7 @@ bool Graphite_NextLight(inout Graphite_LightIterator it, out Graphite_LightSampl
     uvec2 hit = graphite_Hits[it.next++];
 #endif
     vec3 offset, offsetLow;
-#ifdef BENCH_LEANREAD
+#ifdef BENCH_OFFSETRUN
     // Bench: hits come in runs from one tree, so its offsets are read once a run
     if (hit.y != it.region)
     {
@@ -508,7 +510,7 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
     vec3 N = f.baseNormal;
     float NdotL = dot(N, Lc);
 
-#ifdef BENCH_LEANREAD
+#ifdef BENCH_EXPOSEONCE
     c.radiance = vec3(graphite_BenchExposure);
 #else
     c.radiance = vec3(Graphite_Exposure());
@@ -534,7 +536,7 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
             cone = smoothstep(spotCos.x, spotCos.y, axisCos);
         }
 
-#ifdef BENCH_LEANREAD
+#ifdef BENCH_NOSPHERE
         // Bench: every light in the game is a point source
         float radius = 0.0;
         bool sphere = false;
@@ -602,7 +604,7 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
         }
         c.radiance *= Graphite_LightMask(L, -Lc);
     }
-#ifndef BENCH_LEANREAD
+#ifndef BENCH_NOAREA
     else if (L.type == GRAPHITE_LIGHT_TUBE)
     {
         float tubeLength = Graphite_LightSize(L).x;
