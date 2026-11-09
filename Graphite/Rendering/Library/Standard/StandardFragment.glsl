@@ -95,6 +95,12 @@ void Graphite_StandardFragment()
     Graphite_DebugInputs(p.baseColor, p.baseMetalness);
 #endif
 
+#ifdef RR_BENCH_FLAT
+    // Bench: the material's inputs only, none of the closure, lights, probes or fog
+    Graphite_WriteGBuffer(i.geometryNormal, vec3(0.0), 1.0);
+    fragColor = vec4(Graphite_SaturateHalf(p.baseColor), 1.0);
+    return;
+#endif
     PBR_Closure c = PBR_Prepare(p, vRelativePos, i.viewDir, i.geometryNormal, mapVariance);
     vec3 direct = PBR_ShadeLights(c);
     Graphite_ProbeSet probes = PBR_FindProbes(c);

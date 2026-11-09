@@ -102,6 +102,9 @@ vec3 Graphite_LightRadiance(Graphite_LightSample L)
 // How much of a local light reaches a surface past its shadow, 1 lit
 float Graphite_LocalLightShadow(Graphite_LightSample L, vec3 relativePos, vec3 geomNormal)
 {
+#if defined(RR_BENCH_NOSHADOW) || defined(RR_BENCH_NOBRDF) || defined(RR_BENCH_WALK)
+    return 1.0;
+#endif
     if (L.recordArray == GRAPHITE_TREE_INVALID || (L.type != GRAPHITE_LIGHT_POINT && L.type != GRAPHITE_LIGHT_SPOT) || !Graphite_ReceivesShadows())
         return 1.0;
     int slot = floatBitsToInt(Graphite_SpatialVec4(L.recordArray, L.recordWord + 6u).z);
@@ -147,6 +150,43 @@ Graphite_LightIterator Graphite_BeginLights(vec3 relativePos)
     Graphite_TreeQuery q;
     Graphite_BeginQuery(q, relativePos, GRAPHITE_SET_LIGHTS);
     uint array, first, last;
+#ifdef RR_BENCH_TOP6
+    // Bench: walks every leaf and keeps the six lights nearest the point for their reach, so the weakest are the ones left out
+    while (Graphite_NextRun(q, array, first, last))
+    {
+        for (uint k = first; k < last; k++)
+        {
+            vec4 positionRange = Graphite_SpatialVec4(array, k * 9u);
+            precise vec3 position = (positionRange.xyz - q.offset) - q.offsetLow;
+            vec3 d = relativePos - position;
+            float dist2 = dot(d, d);
+            float range2 = positionRange.w * positionRange.w;
+            if (dist2 <= range2 && (floatBitsToUint(Graphite_SpatialVec4(array, k * 9u + 6u).w) & layers) != 0u)
+            {
+                float score = dist2 / max(range2, 1e-6);
+                uint at = it.count;
+                if (at == uint(GRAPHITE_MAX_HITS))
+                {
+                    if (score >= graphite_HitScore[at - 1u])
+                        continue;
+                    at -= 1u;
+                }
+                else
+                {
+                    it.count++;
+                }
+                while (at > 0u && graphite_HitScore[at - 1u] > score)
+                {
+                    graphite_Hits[at] = graphite_Hits[at - 1u];
+                    graphite_HitScore[at] = graphite_HitScore[at - 1u];
+                    at--;
+                }
+                graphite_Hits[at] = uvec2(k | ((array & 1u) << 31), q.region);
+                graphite_HitScore[at] = score;
+            }
+        }
+    }
+#else
     while (it.count < uint(GRAPHITE_MAX_HITS) && Graphite_NextRun(q, array, first, last))
     {
         for (uint k = first; k < last && it.count < uint(GRAPHITE_MAX_HITS); k++)
@@ -158,6 +198,7 @@ Graphite_LightIterator Graphite_BeginLights(vec3 relativePos)
                 graphite_Hits[it.count++] = uvec2(k | ((array & 1u) << 31), q.region);
         }
     }
+#endif
     return it;
 }
 
@@ -443,6 +484,19 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
         c.attenuation = window / max(dist2, 0.01) * cone;
         if (c.attenuation <= 0.0001)
             return false;
+
+#if defined(RR_BENCH_CUT255) || defined(RR_BENCH_DIMHARD)
+        // Bench: the level this light gives a surface facing it, a level of 1 showing the surface at its base color
+        vec4 benchColor = graphite_LightWord(L, 1u, vec4(L.color, L.intensity));
+        float benchLevel = c.attenuation * max(max(benchColor.r, benchColor.g), benchColor.b) * benchColor.w * Graphite_Exposure();
+#endif
+#ifdef RR_BENCH_CUT255
+        if (benchLevel < 1.0 / 255.0)
+            return false;
+#endif
+#ifdef RR_BENCH_DIMHARD
+        graphite_BenchHardShadow = benchLevel < 0.2;
+#endif
 
         // The shadow before the rest of the light, so its working values and the light's are never held together, and a
         // light wholly shadowed here does no more

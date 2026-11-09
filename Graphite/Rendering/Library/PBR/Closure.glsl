@@ -567,13 +567,24 @@ vec3 PBR_ShadeLights(PBR_Closure c)
 #else
     bool wraps = false;
 #endif
+#ifndef RR_BENCH_NOLOCAL
     Graphite_LightIterator it = Graphite_BeginLights(c.position);
+#ifdef RR_BENCH_WALK
+    // Bench: only the search, its result kept alive
+    total += vec3(float(it.count) * 1e-6);
+#else
     Graphite_LightSample L;
     while (Graphite_NextLight(it, L))
     {
         if (Graphite_ContributeLocal(L, f, wraps, l))
+#ifdef RR_BENCH_NOBRDF
+            total += c.metalF0 * l.radiance * l.attenuation;
+#else
             total += Graphite_BRDF(c, l);
+#endif
     }
+#endif
+#endif
     return total;
 }
 

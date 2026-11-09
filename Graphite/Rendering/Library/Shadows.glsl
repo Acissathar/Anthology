@@ -60,6 +60,10 @@ vec3 Graphite_ShadowCoords(vec4 clip, vec4 rect)
     return vec3(rect.xy + local * rect.z, clamp(ndc.z, 0.0, 1.0));
 }
 
+#ifdef RR_BENCH_DIMHARD
+bool graphite_BenchHardShadow = false;
+#endif
+
 // One of the tent's three taps along an axis, f the texel fraction there: its weight and its offset from the base texel
 vec2 graphite_TentTap(int tap, float f)
 {
@@ -88,6 +92,42 @@ float Graphite_SampleShadow(uint slot, vec4 rect, float inverseSize, vec3 coords
     vec2 base = floor(texel + 0.5);
     vec2 f = texel + 0.5 - base;
     base -= 0.5;
+
+#ifdef RR_BENCH_EARLYTENT
+    // Bench: the four corner taps first, a pixel they agree on is wholly lit or wholly dark and skips the other five
+    float corners = 0.0;
+    float cornerLit = 0.0;
+    for (int j = 0; j < 3; j += 2)
+    {
+        vec2 y = graphite_TentTap(j, f.y);
+        for (int i = 0; i < 3; i += 2)
+        {
+            vec2 x = graphite_TentTap(i, f.x);
+            vec2 uv = clamp((base + vec2(x.y, y.y)) * inverseSize, tileMin, tileMax);
+            float s = texture(sampler2DShadow(Graphite_ShadowTextures2D[nonuniformEXT(slot)], Graphite_ShadowSampler), vec3(uv, coords.z));
+            corners += s;
+            cornerLit += x.x * y.x * s;
+        }
+    }
+    if (corners <= 0.0)
+        return 0.0;
+    if (corners >= 4.0)
+        return 1.0;
+    float rest = cornerLit;
+    for (int j = 0; j < 3; j++)
+    {
+        vec2 y = graphite_TentTap(j, f.y);
+        for (int i = 0; i < 3; i++)
+        {
+            if (i != 1 && j != 1)
+                continue;
+            vec2 x = graphite_TentTap(i, f.x);
+            vec2 uv = clamp((base + vec2(x.y, y.y)) * inverseSize, tileMin, tileMax);
+            rest += x.x * y.x * texture(sampler2DShadow(Graphite_ShadowTextures2D[nonuniformEXT(slot)], Graphite_ShadowSampler), vec3(uv, coords.z));
+        }
+    }
+    return rest / 144.0;
+#endif
 
     float lit = 0.0;
     for (int j = 0; j < 3; j++)
@@ -337,6 +377,13 @@ float Graphite_LocalShadow(int shadowSlot, bool cube, vec3 lightPosition, vec3 l
 #ifdef GRAPHITE_CONTACT_SHADOWS
     if (filtering == GRAPHITE_SHADOW_CONTACT && lightRadius > 0.0)
         return mix(1.0, Graphite_LocalContact(first, cube, index, d, Graphite_ShadowPlane(geomNormal, toLight), lightRadius, clip.w), fade);
+#endif
+#ifdef RR_BENCH_HARD
+    filtering = 0.0;
+#endif
+#ifdef RR_BENCH_DIMHARD
+    if (graphite_BenchHardShadow)
+        filtering = 0.0;
 #endif
     return mix(1.0, Graphite_SampleShadow(floatBitsToUint(params.x), rect, params.z, Graphite_ShadowCoords(clip, rect), min(filtering, 1.0)), fade);
 }

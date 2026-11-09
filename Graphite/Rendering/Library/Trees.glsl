@@ -17,7 +17,16 @@
 
 // Each level visited defers at most three siblings, so this covers ten levels of a tree. Above it sit the runs of region
 // entries a query found, as first and end pairs
+#pragma variant global RR_BENCH OFF HARD NOSHADOW NOBRDF WALK NOLOCAL FLAT EARLYTENT DIMHARD CUT255 TOP6 LEANMEM TOYFAST
+#ifdef RR_BENCH_LEANMEM
+#define GRAPHITE_TREE_STACK 16
+#define GRAPHITE_MAX_HITS 12
+#else
 #define GRAPHITE_TREE_STACK 32
+#endif
+#ifdef RR_BENCH_TOP6
+#define GRAPHITE_MAX_HITS 6
+#endif
 #define GRAPHITE_REGION_RUNS 8
 
 #define GRAPHITE_SPATIAL_SETS 16
@@ -72,6 +81,9 @@ uint graphite_TreeStack[GRAPHITE_TREE_STACK + GRAPHITE_REGION_RUNS * 2];
 #define GRAPHITE_MAX_HITS 32
 #endif
 uvec2 graphite_Hits[GRAPHITE_MAX_HITS];
+#ifdef RR_BENCH_TOP6
+float graphite_HitScore[GRAPHITE_MAX_HITS];
+#endif
 
 struct Graphite_TreeWalk
 {
