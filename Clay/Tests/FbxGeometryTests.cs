@@ -64,7 +64,8 @@ public sealed class FbxGeometryTests
     /// <summary>
     /// blender_custom_normals.fbx is a two-quad strip from Blender 5.3 whose custom split normals lean
     /// out from the origin as normalize(x / 2, y / 2, 1), which no normal generator reproduces. Blender
-    /// writes them IndexToDirect with a shuffled NormalsIndex, so a misread index shows up too.
+    /// writes them IndexToDirect with a shuffled NormalsIndex, so a misread index shows up too, and
+    /// the corners of each shared vertex about 1e-5 apart, which must still weld to six vertices.
     /// </summary>
     [Fact]
     public void BlenderFbx_KeepsAuthoredIndexedNormals()
@@ -78,6 +79,7 @@ public sealed class FbxGeometryTests
 
         var mesh = Assert.Single(model.Meshes);
         Assert.NotNull(mesh.Normals);
+        Assert.Equal(6, mesh.VertexCount);
         for (int i = 0; i < mesh.VertexCount; i++)
         {
             var p = mesh.Vertices[i];

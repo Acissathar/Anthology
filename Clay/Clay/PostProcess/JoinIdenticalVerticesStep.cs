@@ -15,12 +15,18 @@ namespace Prowl.Clay.PostProcess;
 /// Collapses identical attribute tuples into shared vertex indices.
 /// </summary>
 /// <remarks>
-/// Compares positions, normals, tangents, color channel 0, and UV channels 0-7. The order of
+/// Compares positions, normals, tangents, color channel 0, and UV channels 0-7, all exactly except
+/// normals, which match within <see cref="NormalToleranceSq"/>. The order of
 /// vertices in the output is determined by the order in which each unique attribute combination
 /// is first encountered while walking the face list, which keeps things cache-friendly.
 /// </remarks>
 internal sealed class JoinIdenticalVerticesStep : IPostProcess
 {
+    // Squared distance between two unit normals about 0.1 degrees apart. Blender 4.4+ writes the
+    // corner normals of one smooth vertex up to ~1e-5 apart, which an exact compare never welds,
+    // while a real hard edge is degrees wide.
+    private const float NormalToleranceSq = 3e-6f;
+
     public PostProcessFlags Flag => PostProcessFlags.JoinIdenticalVertices;
     public string Name => "JoinIdenticalVertices";
 
@@ -184,13 +190,15 @@ internal sealed class JoinIdenticalVerticesStep : IPostProcess
         return false;
     }
 
-    /// <summary>Hashes every vertex over the same attributes <see cref="VerticesEqual"/> compares, morph deltas aside.</summary>
+    /// <summary>
+    /// Hashes every vertex over the same attributes <see cref="VerticesEqual"/> compares, except morph
+    /// deltas and normals: normals near each other can hash apart, so they are only compared.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static uint[] HashVertices(IntermediateMesh m)
     {
         var hashes = new uint[m.Positions.Count];
         Mix(hashes, MemoryMarshal.Cast<Float3, float>(CollectionsMarshal.AsSpan(m.Positions)), 3);
-        if (m.Normals is { } n) Mix(hashes, MemoryMarshal.Cast<Float3, float>(CollectionsMarshal.AsSpan(n)), 3);
         if (m.Tangents is { } t) Mix(hashes, MemoryMarshal.Cast<Float4, float>(CollectionsMarshal.AsSpan(t)), 4);
         if (m.Colors0 is { } c) Mix(hashes, MemoryMarshal.Cast<Color, float>(CollectionsMarshal.AsSpan(c)), 4);
         for (int uv = 0; uv < Mesh.MaxUVChannels; uv++)
@@ -234,7 +242,8 @@ internal sealed class JoinIdenticalVerticesStep : IPostProcess
     private static bool VerticesEqual(IntermediateMesh m, int a, int b, bool includeMorph)
     {
         if (!m.Positions[a].Equals(m.Positions[b])) return false;
-        if (m.Normals is not null && !m.Normals[a].Equals(m.Normals[b])) return false;
+        // Written as !(<=) so a NaN normal still matches nothing.
+        if (m.Normals is not null && !(Float3.DistanceSquared(m.Normals[a], m.Normals[b]) <= NormalToleranceSq)) return false;
         if (m.Tangents is not null && !m.Tangents[a].Equals(m.Tangents[b])) return false;
         if (m.Colors0 is not null && !m.Colors0[a].Equals(m.Colors0[b])) return false;
         for (int uv = 0; uv < Mesh.MaxUVChannels; uv++)
