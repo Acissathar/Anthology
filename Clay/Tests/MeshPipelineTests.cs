@@ -207,11 +207,14 @@ public sealed class MeshPipelineTests
         Assert.Equal(6, mesh.Vertices.Length);
     }
 
-    // OBJ and FBX normals reach the weld unnormalized, so the tolerance has to be an angle.
-    [Fact]
-    public void ShortNormalsAtRightAngles_StaySplit()
+    // OBJ and FBX normals reach the weld unnormalized, and a distance is only an angle between unit
+    // ones: short and huge normals at right angles would otherwise sit within it.
+    [Theory]
+    [InlineData("0 0 0.001", "0.001 0 0")]
+    [InlineData("0 0 1e20", "1e20 0 0")]
+    public void NonUnitNormalsAtRightAngles_StaySplit(string first, string second)
     {
-        var mesh = LoadSharedEdgePair("0 0 0.001", "0.001 0 0");
+        var mesh = LoadSharedEdgePair(first, second);
         Assert.Equal(6, mesh.Vertices.Length);
     }
 
