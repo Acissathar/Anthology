@@ -3,6 +3,7 @@
 
 using Prowl.Clay;
 using Prowl.Clay.Importer;
+using Prowl.Vector;
 
 using Xunit;
 
@@ -58,6 +59,33 @@ public sealed class FbxGeometryTests
 
         // Every node except the synthetic root must have a parent.
         Assert.Equal(1, model.Nodes.Count(n => n.Parent is null));
+    }
+
+    /// <summary>
+    /// blender_custom_normals.fbx is a two-quad strip from Blender 5.3 whose custom split normals lean
+    /// out from the origin as normalize(x / 2, y / 2, 1), which no normal generator reproduces. Blender
+    /// writes them IndexToDirect with a shuffled NormalsIndex, so a misread index shows up too.
+    /// </summary>
+    [Fact]
+    public void BlenderFbx_KeepsAuthoredIndexedNormals()
+    {
+        var warnings = new List<string>();
+        var settings = ModelImporterSettings.GameQuality with
+        {
+            OnLog = e => { if (e.Severity >= ImportLogSeverity.Warning) warnings.Add(e.Message); },
+        };
+        var model = ModelImporter.Load(TestModels.Fbx("blender_custom_normals.fbx"), settings, cancellationToken: TestContext.Current.CancellationToken);
+
+        var mesh = Assert.Single(model.Meshes);
+        Assert.NotNull(mesh.Normals);
+        for (int i = 0; i < mesh.VertexCount; i++)
+        {
+            var p = mesh.Vertices[i];
+            var expected = Float3.Normalize(new Float3(p.X / 2f, p.Y / 2f, 1f));
+            Assert.True(Float3.Dot(expected, mesh.Normals![i]) > 0.9999f,
+                $"vertex {i} at {p}: normal {mesh.Normals[i]}, authored {expected}");
+        }
+        Assert.Empty(warnings);
     }
 
     [Fact]

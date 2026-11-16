@@ -110,8 +110,8 @@ internal static class FbxMeshMapper
         }
 
         // Layered data: normals/UVs/colors/material indices.
-        var unpackedNormals = ReadLayerVec3(node, "LayerElementNormal", "Normals", "NormalIndex", polyIndices.Length, vertexCount, faceSizes, unpackedVertexIndices, ctx);
-        var unpackedTangents = ReadLayerVec3(node, "LayerElementTangent", "Tangents", "TangentIndex", polyIndices.Length, vertexCount, faceSizes, unpackedVertexIndices, ctx);
+        var unpackedNormals = ReadLayerVec3(node, "LayerElementNormal", "Normals", "NormalsIndex", polyIndices.Length, vertexCount, faceSizes, unpackedVertexIndices, ctx);
+        var unpackedTangents = ReadLayerVec3(node, "LayerElementTangent", "Tangents", "TangentsIndex", polyIndices.Length, vertexCount, faceSizes, unpackedVertexIndices, ctx);
         var unpackedBinormals = ReadLayerVec3(node, "LayerElementBinormal", "Binormals", "BinormalsIndex", polyIndices.Length, vertexCount, faceSizes, unpackedVertexIndices, ctx);
         // UV: enumerate every LayerElementUV node (each carries its own slot index in property[0])
         // and route into the per-channel slots on the intermediate mesh. Slot indices that go out
