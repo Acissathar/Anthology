@@ -181,16 +181,13 @@ public sealed class MeshPipelineTests
         Assert.Equal(2, mesh.Indices.Length / 3);
     }
 
-    /// <summary>
-    /// Two triangles sharing an edge, the second carrying normal <paramref name="secondNormal"/>
-    /// where the first carries +Z.
-    /// </summary>
-    private static Mesh LoadSharedEdgePair(string secondNormal) => LoadObj($"""
+    /// <summary>Two triangles sharing an edge, each carrying its own normal on every corner.</summary>
+    private static Mesh LoadSharedEdgePair(string firstNormal, string secondNormal) => LoadObj($"""
         v 0 0 0
         v 1 0 0
         v 0 1 0
         v 1 1 0
-        vn 0 0 1
+        vn {firstNormal}
         vn {secondNormal}
         f 1//1 2//1 3//1
         f 2//2 4//2 3//2
@@ -199,14 +196,22 @@ public sealed class MeshPipelineTests
     [Fact]
     public void NormalsWithinExportNoise_AreWelded()
     {
-        var mesh = LoadSharedEdgePair("0.00001 0 1");
+        var mesh = LoadSharedEdgePair("0 0 1", "0.00001 0 1");
         Assert.Equal(4, mesh.Vertices.Length);
     }
 
     [Fact]
     public void NormalsOneDegreeApart_StaySplit()
     {
-        var mesh = LoadSharedEdgePair("0 0.0174524 0.9998477");
+        var mesh = LoadSharedEdgePair("0 0 1", "0 0.0174524 0.9998477");
+        Assert.Equal(6, mesh.Vertices.Length);
+    }
+
+    // OBJ and FBX normals reach the weld unnormalized, so the tolerance has to be an angle.
+    [Fact]
+    public void ShortNormalsAtRightAngles_StaySplit()
+    {
+        var mesh = LoadSharedEdgePair("0 0 0.001", "0.001 0 0");
         Assert.Equal(6, mesh.Vertices.Length);
     }
 

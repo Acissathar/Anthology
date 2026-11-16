@@ -238,12 +238,17 @@ internal sealed class JoinIdenticalVerticesStep : IPostProcess
         return h;
     }
 
+    // Nothing upstream normalizes normals, so the tolerance scales with the shorter one to stay an
+    // angle. The exact compare welds identical infinite normals, whose distance is NaN.
+    private static bool NormalsMatch(Float3 a, Float3 b) =>
+        a.Equals(b) ||
+        Float3.DistanceSquared(a, b) <= NormalToleranceSq * Math.Min(Float3.LengthSquared(a), Float3.LengthSquared(b));
+
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private static bool VerticesEqual(IntermediateMesh m, int a, int b, bool includeMorph)
     {
         if (!m.Positions[a].Equals(m.Positions[b])) return false;
-        // Written as !(<=) so a NaN normal still matches nothing.
-        if (m.Normals is not null && !(Float3.DistanceSquared(m.Normals[a], m.Normals[b]) <= NormalToleranceSq)) return false;
+        if (m.Normals is { } n && !NormalsMatch(n[a], n[b])) return false;
         if (m.Tangents is not null && !m.Tangents[a].Equals(m.Tangents[b])) return false;
         if (m.Colors0 is not null && !m.Colors0[a].Equals(m.Colors0[b])) return false;
         for (int uv = 0; uv < Mesh.MaxUVChannels; uv++)
